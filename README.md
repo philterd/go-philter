@@ -7,11 +7,6 @@ Philter is an application for PII/PHI redaction and anonymization. It provides e
 
 Contexts support referential integrity and can be used to store and retrieve redactions across multiple requests.
 
-This project builds upon several of our other open-source projects:
-
-* [Phileas](https://github.com/philterd/go-phileas) for text redaction.
-* [Philolog](https://github.com/philterd/philolog) for immutable redaction logging.
-
 For the Java version of Philter, see [philter-java](https://github.com/philterd/philter).
 
 ## Features

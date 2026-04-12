@@ -6,13 +6,6 @@ This document provides technical details for developers working on the Philter G
 
 Philter is built using the [Gin Web Framework](https://github.com/gin-gonic/gin) and integrates with the [go-phileas](https://github.com/philterd/go-phileas) library for core redaction logic.
 
-## Dependencies
-
-This project builds upon several of our other open-source projects:
-
-* [Phileas](https://github.com/philterd/go-phileas) for text redaction.
-* [Philolog](https://github.com/philterd/philolog) for immutable redaction logging.
-
 ## Environment Variables
 
 Philter is configured using environment variables:
