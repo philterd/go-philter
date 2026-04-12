@@ -1,0 +1,26 @@
+# Binaries
+go-philter
+go-philter.exe
+
+# Dependency directories
+vendor/
+
+# Test coverage
+coverage.txt
+coverage.out
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Icon?
+Thumbs.db
+
+# Docker
+.docker-build/
