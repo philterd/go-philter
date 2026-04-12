@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package main
+package handlers
 
 import (
 	"bytes"
@@ -24,14 +24,16 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/philterd/go-phileas/pkg/policy"
+	"github.com/philterd/go-philter/internal/metrics"
+	"github.com/philterd/go-philter/internal/model"
+	"github.com/philterd/go-philter/internal/policy"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHandleFilter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/filter", handleFilter)
+	r.POST("/api/filter", HandleFilter)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -43,9 +45,10 @@ func TestHandleFilter(t *testing.T) {
 		},
 	}
 	*p.Identifiers.SSN.Enabled = true
+
 	policyService.Put("test-policy", p)
 
-	reqBody := FilterRequest{
+	reqBody := model.FilterRequest{
 		Text:       "His SSN is 123-45-6789.",
 		Context:    "test",
 		PolicyName: "test-policy",
@@ -57,6 +60,7 @@ func TestHandleFilter(t *testing.T) {
 	r.ServeHTTP(resp, req)
 
 	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.NotEmpty(t, resp.Header().Get("X-Document-Id"))
 
 	var res map[string]any
 	json.Unmarshal(resp.Body.Bytes(), &res)
@@ -66,7 +70,7 @@ func TestHandleFilter(t *testing.T) {
 func TestHandleExplain(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/explain", handleExplain)
+	r.POST("/api/explain", HandleExplain)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -78,9 +82,10 @@ func TestHandleExplain(t *testing.T) {
 		},
 	}
 	*p.Identifiers.SSN.Enabled = true
+
 	policyService.Put("test-policy", p)
 
-	reqBody := FilterRequest{
+	reqBody := model.FilterRequest{
 		Text:       "His SSN is 123-45-6789.",
 		Context:    "test",
 		PolicyName: "test-policy",
@@ -92,6 +97,7 @@ func TestHandleExplain(t *testing.T) {
 	r.ServeHTTP(resp, req)
 
 	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.NotEmpty(t, resp.Header().Get("X-Document-Id"))
 
 	var spans []any
 	json.Unmarshal(resp.Body.Bytes(), &spans)
@@ -101,7 +107,7 @@ func TestHandleExplain(t *testing.T) {
 func TestContextPersistence(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/filter", handleFilter)
+	r.POST("/api/filter", HandleFilter)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -113,10 +119,11 @@ func TestContextPersistence(t *testing.T) {
 		},
 	}
 	*p.Identifiers.SSN.Enabled = true
+
 	policyService.Put("persistence-policy", p)
 
 	// First call to /filter with context "persistence-test"
-	reqBody1 := FilterRequest{
+	reqBody1 := model.FilterRequest{
 		Text:       "His SSN is 123-45-6789.",
 		Context:    "persistence-test",
 		PolicyName: "persistence-policy",
@@ -150,9 +157,10 @@ func TestContextPersistence(t *testing.T) {
 		},
 	}
 	*pDisabled.Identifiers.SSN.Enabled = false
+
 	policyService.Put("disabled-policy", pDisabled)
 
-	reqBody2 := FilterRequest{
+	reqBody2 := model.FilterRequest{
 		Text:       "The same SSN 123-45-6789 should be in context.",
 		Context:    "persistence-test",
 		PolicyName: "disabled-policy",
@@ -178,7 +186,7 @@ func TestContextPersistence(t *testing.T) {
 func TestHandleMetrics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/metrics", handleMetrics)
+	r.GET("/metrics", metrics.HandleMetrics)
 
 	req, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
 	resp := httptest.NewRecorder()
@@ -191,15 +199,16 @@ func TestHandleMetrics(t *testing.T) {
 func TestTokenMetrics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/filter", handleFilter)
-	r.POST("/api/explain", handleExplain)
-	r.GET("/metrics", handleMetrics)
+	r.POST("/api/filter", HandleFilter)
+	r.POST("/api/explain", HandleExplain)
+	r.GET("/metrics", metrics.HandleMetrics)
 
 	p := &policy.Policy{}
+
 	policyService.Put("token-policy", p)
 
 	// 1. Call /filter with 3 tokens
-	reqBody1 := FilterRequest{
+	reqBody1 := model.FilterRequest{
 		Text:       "one two three",
 		PolicyName: "token-policy",
 	}
@@ -210,7 +219,7 @@ func TestTokenMetrics(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp1.Code)
 
 	// 2. Call /explain with 2 tokens
-	reqBody2 := FilterRequest{
+	reqBody2 := model.FilterRequest{
 		Text:       "four five",
 		PolicyName: "token-policy",
 	}
@@ -237,9 +246,9 @@ func TestTokenMetrics(t *testing.T) {
 func TestRedactionMetrics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/filter", handleFilter)
-	r.POST("/api/explain", handleExplain)
-	r.GET("/metrics", handleMetrics)
+	r.POST("/api/filter", HandleFilter)
+	r.POST("/api/explain", HandleExplain)
+	r.GET("/metrics", metrics.HandleMetrics)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -251,10 +260,11 @@ func TestRedactionMetrics(t *testing.T) {
 		},
 	}
 	*p.Identifiers.SSN.Enabled = true
+
 	policyService.Put("redaction-policy", p)
 
 	// 1. Call /filter with 1 SSN (1 redaction)
-	reqBody1 := FilterRequest{
+	reqBody1 := model.FilterRequest{
 		Text:       "My SSN is 123-45-6789.",
 		PolicyName: "redaction-policy",
 	}
@@ -265,7 +275,7 @@ func TestRedactionMetrics(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp1.Code)
 
 	// 2. Call /explain with 1 SSN (1 redaction)
-	reqBody2 := FilterRequest{
+	reqBody2 := model.FilterRequest{
 		Text:       "Another SSN: 987-65-4321.",
 		PolicyName: "redaction-policy",
 	}
@@ -288,8 +298,8 @@ func TestRedactionMetrics(t *testing.T) {
 func TestHandleDeleteContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/api/filter", handleFilter)
-	r.DELETE("/api/context/:name", handleDeleteContext)
+	r.POST("/api/filter", HandleFilter)
+	r.DELETE("/api/context/:name", HandleDeleteContext)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -301,11 +311,12 @@ func TestHandleDeleteContext(t *testing.T) {
 		},
 	}
 	*p.Identifiers.SSN.Enabled = true
+
 	policyService.Put("delete-policy", p)
 
 	// 1. Put some data into a context
 	contextName := "delete-test"
-	reqBody := FilterRequest{
+	reqBody := model.FilterRequest{
 		Text:       "His SSN is 123-45-6789.",
 		Context:    "delete-test",
 		PolicyName: "delete-policy",
@@ -334,7 +345,7 @@ func TestHandleDeleteContext(t *testing.T) {
 func TestHandleListContexts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/contexts", handleListContexts)
+	r.GET("/api/contexts", HandleListContexts)
 
 	// Clean up and add some contexts
 	contextService.Delete("list-test-1")
@@ -360,7 +371,7 @@ func TestHandleListContexts(t *testing.T) {
 func TestHandleGetContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/contexts/:name", handleGetContext)
+	r.GET("/api/contexts/:name", HandleGetContext)
 
 	contextName := "get-test-context"
 	contextService.Delete(contextName)
@@ -385,10 +396,10 @@ func TestHandleGetContext(t *testing.T) {
 func TestHandlePolicyCRUD(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.GET("/api/policies", handleListPolicies)
-	r.GET("/api/policies/:name", handleGetPolicy)
-	r.POST("/api/policies", handlePutPolicy)
-	r.DELETE("/api/policies/:name", handleDeletePolicy)
+	r.GET("/api/policies", HandleListPolicies)
+	r.GET("/api/policies/:name", HandleGetPolicy)
+	r.POST("/api/policies", HandlePutPolicy)
+	r.DELETE("/api/policies/:name", HandleDeletePolicy)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -402,7 +413,7 @@ func TestHandlePolicyCRUD(t *testing.T) {
 	*p.Identifiers.SSN.Enabled = true
 
 	// 1. POST policy
-	reqBody := PolicyRequest{
+	reqBody := model.PolicyRequest{
 		Name:   "crud-policy",
 		Policy: p,
 	}
@@ -452,7 +463,7 @@ func TestAuthMiddleware(t *testing.T) {
 		defer func() { authEnabled = oldAuth }()
 
 		r := gin.New()
-		r.Use(authMiddleware())
+		r.Use(AuthMiddleware())
 		r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 		req, _ := http.NewRequest(http.MethodGet, "/test", nil)
@@ -473,7 +484,7 @@ func TestAuthMiddleware(t *testing.T) {
 		}()
 
 		r := gin.New()
-		r.Use(authMiddleware())
+		r.Use(AuthMiddleware())
 		r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 		req, _ := http.NewRequest(http.MethodGet, "/test", nil)
@@ -495,7 +506,7 @@ func TestAuthMiddleware(t *testing.T) {
 		}()
 
 		r := gin.New()
-		r.Use(authMiddleware())
+		r.Use(AuthMiddleware())
 		r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 		req, _ := http.NewRequest(http.MethodGet, "/test", nil)
@@ -517,7 +528,7 @@ func TestAuthMiddleware(t *testing.T) {
 		}()
 
 		r := gin.New()
-		r.Use(authMiddleware())
+		r.Use(AuthMiddleware())
 		r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 		req, _ := http.NewRequest(http.MethodGet, "/test", nil)

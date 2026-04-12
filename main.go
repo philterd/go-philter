@@ -21,28 +21,35 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/philterd/go-philter/internal/handlers"
+	"github.com/philterd/go-philter/internal/metrics"
 )
 
 var version = "development"
 
 func main() {
+	handlers.Version = version
+	handlers.Init()
+
+	metrics.SetContextService(handlers.GetContextService())
+
 	r := gin.Default()
 
-	api := r.Group("/api", authMiddleware())
+	api := r.Group("/api", handlers.AuthMiddleware())
 	{
-		api.POST("/filter", handleFilter)
-		api.POST("/explain", handleExplain)
-		api.GET("/ledger", handleGetLedger)
-		api.DELETE("/contexts/:name", handleDeleteContext)
-		api.GET("/contexts", handleListContexts)
-		api.GET("/contexts/:name", handleGetContext)
-		api.GET("/policies", handleListPolicies)
-		api.GET("/policies/:name", handleGetPolicy)
-		api.POST("/policies", handlePutPolicy)
-		api.DELETE("/policies/:name", handleDeletePolicy)
+		api.POST("/filter", handlers.HandleFilter)
+		api.POST("/explain", handlers.HandleExplain)
+		api.GET("/ledger", handlers.HandleGetLedger)
+		api.DELETE("/contexts/:name", handlers.HandleDeleteContext)
+		api.GET("/contexts", handlers.HandleListContexts)
+		api.GET("/contexts/:name", handlers.HandleGetContext)
+		api.GET("/policies", handlers.HandleListPolicies)
+		api.GET("/policies/:name", handlers.HandleGetPolicy)
+		api.POST("/policies", handlers.HandlePutPolicy)
+		api.DELETE("/policies/:name", handlers.HandleDeletePolicy)
 	}
 
-	r.GET("/metrics", handleMetrics)
+	r.GET("/metrics", metrics.HandleMetrics)
 
 	certFile := os.Getenv("PHILTER_CERT_FILE")
 	keyFile := os.Getenv("PHILTER_KEY_FILE")

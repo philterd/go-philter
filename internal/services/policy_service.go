@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package main
+package services
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/philterd/go-phileas/pkg/policy"
+	"github.com/philterd/go-philter/internal/policy"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -41,7 +41,7 @@ type customInMemoryPolicyService struct {
 	policies map[string]*policy.Policy
 }
 
-func newCustomInMemoryPolicyService() *customInMemoryPolicyService {
+func NewCustomInMemoryPolicyService() *customInMemoryPolicyService {
 	return &customInMemoryPolicyService{
 		policies: make(map[string]*policy.Policy),
 	}

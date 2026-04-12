@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-package main
+package model
 
-import "github.com/philterd/go-phileas/pkg/policy"
+import "github.com/philterd/go-philter/internal/policy"
 
 type FilterRequest struct {
 	Text       string `json:"text" binding:"required"`

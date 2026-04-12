@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package main
+package handlers
 
 import (
 	"log"
@@ -23,22 +23,28 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/philterd/go-phileas/pkg/services"
+	"github.com/google/uuid"
+	"github.com/philterd/go-philter/internal/metrics"
+	"github.com/philterd/go-philter/internal/model"
+	"github.com/philterd/go-philter/internal/services"
 )
+
+func init() { Init() }
 
 var (
-	contextService ContextManager
-	policyService  PolicyService
-	ledger         Ledger
+	contextService services.ContextManager
+	policyService  services.PolicyService
+	ledger         services.Ledger
 	authEnabled    bool
 	apiToken       string
+	Version        string
 )
 
-func init() {
+func Init() {
 	authEnabled = os.Getenv("PHILTER_AUTH_ENABLED") != "false"
 	apiToken = os.Getenv("PHILTER_API_TOKEN")
 
-	log.Printf("Phileas version %s", version)
+	log.Printf("Phileas version %s", Version)
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI != "" {
 		dbName := os.Getenv("MONGO_DATABASE")
@@ -50,12 +56,12 @@ func init() {
 
 		log.Printf("Connecting to MongoDB for services: %s", mongoURI)
 		var err error
-		contextService, err = NewMongoDBContextService(mongoURI, dbName, contextCollectionName)
+		contextService, err = services.NewMongoDBContextService(mongoURI, dbName, contextCollectionName)
 		if err != nil {
 			log.Fatalf("Failed to initialize MongoDB context service: %v", err)
 		}
 
-		policyService, err = NewMongoDBPolicyService(mongoURI, dbName, policyCollectionName)
+		policyService, err = services.NewMongoDBPolicyService(mongoURI, dbName, policyCollectionName)
 		if err != nil {
 			log.Fatalf("Failed to initialize MongoDB policy service: %v", err)
 		}
@@ -65,27 +71,39 @@ func init() {
 			ledgerCollectionName = "ledger"
 		}
 
-		ledger, err = newMongoLedger(mongoURI, dbName, ledgerCollectionName)
+		ledger, err = services.NewMongoLedger(mongoURI, dbName, ledgerCollectionName)
 		if err != nil {
 			log.Fatalf("Failed to initialize MongoDB ledger: %v", err)
 		}
 	} else {
 		log.Println("Using InMemoryContextService and InMemoryPolicyService")
-		contextService = newCustomInMemoryContextService()
-		policyService = newCustomInMemoryPolicyService()
-		ledger = newMemoryLedger()
+		contextService = services.NewInMemoryContextService()
+		policyService = services.NewCustomInMemoryPolicyService()
+		ledger = services.NewMemoryLedger()
 	}
 }
 
-func handleFilter(c *gin.Context) {
-	var req FilterRequest
+// GetContextService returns the context service.
+func GetContextService() services.ContextManager {
+	return contextService
+}
+
+func HandleFilter(c *gin.Context) {
+	var req model.FilterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	docID := req.DocumentId
+	if docID == "" {
+		docID = uuid.New().String()
+	}
+
+	c.Header("X-Document-Id", docID)
+
 	tokens := strings.Fields(req.Text)
-	incrementTokensReceived(len(tokens))
+	metrics.IncrementTokensReceived(len(tokens))
 
 	p, err := policyService.Get(req.PolicyName)
 	if err != nil {
@@ -109,7 +127,7 @@ func handleFilter(c *gin.Context) {
 		return
 	}
 
-	incrementRedactions(len(res.Spans))
+	metrics.IncrementRedactions(len(res.Spans))
 
 	if req.Context != "" {
 		for _, span := range res.Spans {
@@ -118,7 +136,7 @@ func handleFilter(c *gin.Context) {
 	}
 
 	for _, span := range res.Spans {
-		if err := ledger.Record(req.DocumentId, req.FileName, span, span.Replacement); err != nil {
+		if err := ledger.Record(docID, req.FileName, span, span.Replacement); err != nil {
 			log.Printf("Error: failed to record redaction in ledger: %v", err)
 		}
 	}
@@ -126,15 +144,22 @@ func handleFilter(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-func handleExplain(c *gin.Context) {
-	var req FilterRequest
+func HandleExplain(c *gin.Context) {
+	var req model.FilterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	docID := req.DocumentId
+	if docID == "" {
+		docID = uuid.New().String()
+	}
+
+	c.Header("X-Document-Id", docID)
+
 	tokens := strings.Fields(req.Text)
-	incrementTokensReceived(len(tokens))
+	metrics.IncrementTokensReceived(len(tokens))
 
 	p, err := policyService.Get(req.PolicyName)
 	if err != nil {
@@ -158,7 +183,7 @@ func handleExplain(c *gin.Context) {
 		return
 	}
 
-	incrementRedactions(len(spans))
+	metrics.IncrementRedactions(len(spans))
 
 	if req.Context != "" {
 		for _, span := range spans {
@@ -167,7 +192,7 @@ func handleExplain(c *gin.Context) {
 	}
 
 	for _, span := range spans {
-		if err := ledger.Record(req.DocumentId, req.FileName, span, span.Replacement); err != nil {
+		if err := ledger.Record(docID, req.FileName, span, span.Replacement); err != nil {
 			log.Printf("Error: failed to record redaction in ledger: %v", err)
 		}
 	}
@@ -175,7 +200,7 @@ func handleExplain(c *gin.Context) {
 	c.JSON(http.StatusOK, spans)
 }
 
-func handleGetLedger(c *gin.Context) {
+func HandleGetLedger(c *gin.Context) {
 	docID := c.Query("documentId")
 	if docID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId parameter is required"})
@@ -191,7 +216,7 @@ func handleGetLedger(c *gin.Context) {
 	c.JSON(http.StatusOK, entries)
 }
 
-func handleDeleteContext(c *gin.Context) {
+func HandleDeleteContext(c *gin.Context) {
 	contextName := c.Param("name")
 	if contextName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "context name is required"})
@@ -206,7 +231,7 @@ func handleDeleteContext(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func handleListContexts(c *gin.Context) {
+func HandleListContexts(c *gin.Context) {
 	contexts, err := contextService.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list contexts: " + err.Error()})
@@ -216,7 +241,7 @@ func handleListContexts(c *gin.Context) {
 	c.JSON(http.StatusOK, contexts)
 }
 
-func handleGetContext(c *gin.Context) {
+func HandleGetContext(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "context name is required"})
@@ -232,7 +257,7 @@ func handleGetContext(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"name": name, "count": count})
 }
 
-func handleListPolicies(c *gin.Context) {
+func HandleListPolicies(c *gin.Context) {
 	policies, err := policyService.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list policies: " + err.Error()})
@@ -241,7 +266,7 @@ func handleListPolicies(c *gin.Context) {
 	c.JSON(http.StatusOK, policies)
 }
 
-func handleGetPolicy(c *gin.Context) {
+func HandleGetPolicy(c *gin.Context) {
 	name := c.Param("name")
 	p, err := policyService.Get(name)
 	if err != nil {
@@ -255,8 +280,8 @@ func handleGetPolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
-func handlePutPolicy(c *gin.Context) {
-	var req PolicyRequest
+func HandlePutPolicy(c *gin.Context) {
+	var req model.PolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -269,7 +294,7 @@ func handlePutPolicy(c *gin.Context) {
 	c.Status(http.StatusCreated)
 }
 
-func handleDeletePolicy(c *gin.Context) {
+func HandleDeletePolicy(c *gin.Context) {
 	name := c.Param("name")
 	if err := policyService.Delete(name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete policy: " + err.Error()})
@@ -278,7 +303,7 @@ func handleDeletePolicy(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func authMiddleware() gin.HandlerFunc {
+func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !authEnabled {
 			c.Next()

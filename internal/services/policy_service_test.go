@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-package main
+package services
 
 import (
 	"testing"
 
-	"github.com/philterd/go-phileas/pkg/policy"
+	"github.com/philterd/go-philter/internal/policy"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestCustomInMemoryPolicyService(t *testing.T) {
-	s := newCustomInMemoryPolicyService()
+	s := NewCustomInMemoryPolicyService()
 
 	p1 := &policy.Policy{}
 

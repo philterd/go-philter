@@ -1,20 +1,18 @@
-/*
- * Copyright 2026 Philterd, LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2026 Philterd, LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-package main
+package services
 
 import (
 	"context"
@@ -25,27 +23,41 @@ import (
 	"sync"
 	"time"
 
-	"github.com/philterd/go-phileas/pkg/services"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// ContextManager extends services.ContextService with Delete, List, and Count methods.
+// ContextService stores PII tokens and their replacement values to establish
+// referential integrity while redacting text. The store is keyed by context
+// name, and each context holds a map of token → replacement.
+type ContextService interface {
+	// Get returns the replacement for the given token in the given context.
+	// The second return value is false when no entry exists.
+	Get(ctxName, token string) (string, bool)
+
+	// Put stores a token → replacement mapping under the given context.
+	Put(ctxName, token, replacement string)
+}
+
+// ContextManager extends ContextService with Delete, List, and Count methods.
 type ContextManager interface {
-	services.ContextService
+	ContextService
 	Delete(ctxName string) error
 	List() ([]string, error)
 	Count(ctxName string) (int, error)
 }
 
-type customInMemoryContextService struct {
+// InMemoryContextService is the default ContextService implementation that
+// keeps all data in an in-memory map of maps.
+type InMemoryContextService struct {
 	mu    sync.RWMutex
 	store map[string]map[string]string
 }
 
-func newCustomInMemoryContextService() *customInMemoryContextService {
-	return &customInMemoryContextService{
+// NewInMemoryContextService creates a new, empty InMemoryContextService.
+func NewInMemoryContextService() *InMemoryContextService {
+	return &InMemoryContextService{
 		store: make(map[string]map[string]string),
 	}
 }
@@ -56,35 +68,39 @@ func hashToken(token string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (s *customInMemoryContextService) Get(context, token string) (string, bool) {
+// Get returns the replacement for the given token in the given context.
+func (s *InMemoryContextService) Get(ctxName, token string) (string, bool) {
 	hashedToken := hashToken(token)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if ctx, ok := s.store[context]; ok {
+	if ctx, ok := s.store[ctxName]; ok {
 		replacement, found := ctx[hashedToken]
 		return replacement, found
 	}
 	return "", false
 }
 
-func (s *customInMemoryContextService) Put(context, token, replacement string) {
+// Put stores a token → replacement mapping under the given context.
+func (s *InMemoryContextService) Put(ctxName, token, replacement string) {
 	hashedToken := hashToken(token)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.store[context]; !ok {
-		s.store[context] = make(map[string]string)
+	if _, ok := s.store[ctxName]; !ok {
+		s.store[ctxName] = make(map[string]string)
 	}
-	s.store[context][hashedToken] = replacement
+	s.store[ctxName][hashedToken] = replacement
 }
 
-func (s *customInMemoryContextService) Delete(context string) error {
+// Delete removes all entries for the given context.
+func (s *InMemoryContextService) Delete(ctxName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.store, context)
+	delete(s.store, ctxName)
 	return nil
 }
 
-func (s *customInMemoryContextService) List() ([]string, error) {
+// List returns the names of all contexts.
+func (s *InMemoryContextService) List() ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	keys := make([]string, 0, len(s.store))
@@ -94,27 +110,31 @@ func (s *customInMemoryContextService) List() ([]string, error) {
 	return keys, nil
 }
 
-func (s *customInMemoryContextService) Count(context string) (int, error) {
+// Count returns the number of entries in the given context.
+func (s *InMemoryContextService) Count(ctxName string) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if ctx, ok := s.store[context]; ok {
+	if ctx, ok := s.store[ctxName]; ok {
 		return len(ctx), nil
 	}
 	return 0, nil
 }
 
+// MongoDBContextService is a ContextService implementation that uses MongoDB for storage.
 type MongoDBContextService struct {
 	client     *mongo.Client
 	database   *mongo.Database
 	collection *mongo.Collection
 }
 
+// ContextRecord represents a single context entry in MongoDB.
 type ContextRecord struct {
 	Context     string `bson:"context"`
 	Token       string `bson:"token"`
 	Replacement string `bson:"replacement"`
 }
 
+// NewMongoDBContextService creates a new MongoDBContextService.
 func NewMongoDBContextService(uri, dbName, collectionName string) (*MongoDBContextService, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -148,6 +168,7 @@ func NewMongoDBContextService(uri, dbName, collectionName string) (*MongoDBConte
 	}, nil
 }
 
+// Get returns the replacement for the given token in the given context from MongoDB.
 func (s *MongoDBContextService) Get(ctxName, token string) (string, bool) {
 	hashedToken := hashToken(token)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -171,6 +192,7 @@ func (s *MongoDBContextService) Get(ctxName, token string) (string, bool) {
 	return record.Replacement, true
 }
 
+// Put stores a token → replacement mapping under the given context in MongoDB.
 func (s *MongoDBContextService) Put(ctxName, token, replacement string) {
 	hashedToken := hashToken(token)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -195,6 +217,7 @@ func (s *MongoDBContextService) Put(ctxName, token, replacement string) {
 	}
 }
 
+// Delete removes all entries for the given context from MongoDB.
 func (s *MongoDBContextService) Delete(ctxName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -211,6 +234,7 @@ func (s *MongoDBContextService) Delete(ctxName string) error {
 	return nil
 }
 
+// List returns the names of all contexts from MongoDB.
 func (s *MongoDBContextService) List() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -224,6 +248,7 @@ func (s *MongoDBContextService) List() ([]string, error) {
 	return contexts, nil
 }
 
+// Count returns the number of entries in the given context from MongoDB.
 func (s *MongoDBContextService) Count(ctxName string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

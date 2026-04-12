@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-package main
+package metrics
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	
 	"github.com/gin-gonic/gin"
+	"github.com/philterd/go-philter/internal/services"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +38,7 @@ func TestPhilterHealthyMetric(t *testing.T) {
 func TestIncrementTokensReceived(t *testing.T) {
 	initial := testutil.ToFloat64(philterTokensReceivedTotal)
 
-	incrementTokensReceived(5)
+	IncrementTokensReceived(5)
 
 	final := testutil.ToFloat64(philterTokensReceivedTotal)
 	assert.Equal(t, initial+5, final)
@@ -45,7 +47,7 @@ func TestIncrementTokensReceived(t *testing.T) {
 func TestIncrementRedactions(t *testing.T) {
 	initial := testutil.ToFloat64(philterRedactionsTotal)
 
-	incrementRedactions(3)
+	IncrementRedactions(3)
 
 	final := testutil.ToFloat64(philterRedactionsTotal)
 	assert.Equal(t, initial+3, final)
@@ -54,11 +56,11 @@ func TestIncrementRedactions(t *testing.T) {
 func TestHandleMetricsEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/metrics", handleMetrics)
+	r.GET("/metrics", HandleMetrics)
 
 	// Increment metrics to ensure they appear in the output
-	incrementTokensReceived(10)
-	incrementRedactions(2)
+	IncrementTokensReceived(10)
+	IncrementRedactions(2)
 
 	req, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
 	resp := httptest.NewRecorder()
@@ -95,7 +97,7 @@ func TestMetricsRegistry(t *testing.T) {
 func TestPhilterContextsTotalMetric(t *testing.T) {
 	// Initialize contextService if nil (it should be initialized in handlers.go init())
 	if contextService == nil {
-		contextService = newCustomInMemoryContextService()
+		contextService = services.NewInMemoryContextService()
 	}
 
 	// Add some contexts

@@ -14,16 +14,19 @@
  * limitations under the License.
  */
 
-package main
+package metrics
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/philterd/go-philter/internal/services"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
+	contextService services.ContextManager
+
 	philterHealthy = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "philter_healthy",
 		Help: "A boolean indicating Philter is healthy.",
@@ -59,14 +62,22 @@ func init() {
 	philterHealthy.Set(1)
 }
 
-func handleMetrics(c *gin.Context) {
+// SetContextService sets the context service to be used for metrics.
+func SetContextService(cs services.ContextManager) {
+	contextService = cs
+}
+
+// HandleMetrics is the Gin handler for Prometheus metrics.
+func HandleMetrics(c *gin.Context) {
 	promhttp.Handler().ServeHTTP(c.Writer, c.Request)
 }
 
-func incrementTokensReceived(count int) {
+// IncrementTokensReceived increments the tokens received counter.
+func IncrementTokensReceived(count int) {
 	philterTokensReceivedTotal.Add(float64(count))
 }
 
-func incrementRedactions(count int) {
+// IncrementRedactions increments the redactions counter.
+func IncrementRedactions(count int) {
 	philterRedactionsTotal.Add(float64(count))
 }

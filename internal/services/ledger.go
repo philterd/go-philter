@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package main
+package services
 
 import (
 	"context"
@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/philterd/go-phileas/pkg/model"
+	"github.com/philterd/go-philter/internal/model"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -111,7 +111,7 @@ type memoryLedger struct {
 	encryptionKey []byte
 }
 
-func newMemoryLedger() *memoryLedger {
+func NewMemoryLedger() *memoryLedger {
 	var key []byte
 	keyStr := os.Getenv("LEDGER_ENCRYPTION_KEY")
 	if keyStr != "" {
@@ -191,7 +191,7 @@ type mongoLedger struct {
 	encryptionKey []byte
 }
 
-func newMongoLedger(uri, dbName, collectionName string) (*mongoLedger, error) {
+func NewMongoLedger(uri, dbName, collectionName string) (*mongoLedger, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
