@@ -23,8 +23,6 @@ Philter is configured using environment variables:
 | `PHILTER_API_TOKEN` | The token required for Bearer authentication. | None |
 | `MONGO_URI` | MongoDB connection URI. If not set, In-Memory storage is used. | None |
 | `MONGO_DATABASE` | MongoDB database name. | `philter` |
-| `MONGO_COLLECTION` | MongoDB collection name for contexts. | `contexts` |
-| `MONGO_POLICY_COLLECTION` | MongoDB collection name for policies. | `policies` |
 | `PHILTER_CERT_FILE` | Path to the SSL certificate for HTTPS. | None |
 | `PHILTER_KEY_FILE` | Path to the SSL private key for HTTPS. | None |
 

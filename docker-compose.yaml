@@ -7,10 +7,9 @@ services:
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - MONGO_DATABASE=philter
-      - MONGO_COLLECTION=contexts
-      - MONGO_POLICY_COLLECTION=policies
       - PHILTER_AUTH_ENABLED=true
       - PHILTER_API_TOKEN=secret-token
+      - LEDGER_ENCRYPTION_KEY=12345678901234567890123456789012
     depends_on:
       - mongodb
 

@@ -32,6 +32,7 @@ func main() {
 	{
 		api.POST("/filter", handleFilter)
 		api.POST("/explain", handleExplain)
+		api.GET("/ledger", handleGetLedger)
 		api.DELETE("/contexts/:name", handleDeleteContext)
 		api.GET("/contexts", handleListContexts)
 		api.GET("/contexts/:name", handleGetContext)

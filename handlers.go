@@ -29,6 +29,7 @@ import (
 var (
 	contextService ContextManager
 	policyService  PolicyService
+	ledger         Ledger
 	authEnabled    bool
 	apiToken       string
 )
@@ -44,14 +45,8 @@ func init() {
 		if dbName == "" {
 			dbName = "philter"
 		}
-		contextCollectionName := os.Getenv("MONGO_COLLECTION")
-		if contextCollectionName == "" {
-			contextCollectionName = "contexts"
-		}
-		policyCollectionName := os.Getenv("MONGO_POLICY_COLLECTION")
-		if policyCollectionName == "" {
-			policyCollectionName = "policies"
-		}
+		contextCollectionName := "contexts"
+		policyCollectionName := "policies"
 
 		log.Printf("Connecting to MongoDB for services: %s", mongoURI)
 		var err error
@@ -64,10 +59,21 @@ func init() {
 		if err != nil {
 			log.Fatalf("Failed to initialize MongoDB policy service: %v", err)
 		}
+
+		ledgerCollectionName := os.Getenv("MONGO_LEDGER_COLLECTION")
+		if ledgerCollectionName == "" {
+			ledgerCollectionName = "ledger"
+		}
+
+		ledger, err = newMongoLedger(mongoURI, dbName, ledgerCollectionName)
+		if err != nil {
+			log.Fatalf("Failed to initialize MongoDB ledger: %v", err)
+		}
 	} else {
 		log.Println("Using InMemoryContextService and InMemoryPolicyService")
 		contextService = newCustomInMemoryContextService()
 		policyService = newCustomInMemoryPolicyService()
+		ledger = newMemoryLedger()
 	}
 }
 
@@ -108,6 +114,12 @@ func handleFilter(c *gin.Context) {
 	if req.Context != "" {
 		for _, span := range res.Spans {
 			contextService.Put(req.Context, span.Text, span.Replacement)
+		}
+	}
+
+	for _, span := range res.Spans {
+		if err := ledger.Record(req.DocumentId, req.FileName, span, span.Replacement); err != nil {
+			log.Printf("Error: failed to record redaction in ledger: %v", err)
 		}
 	}
 
@@ -154,7 +166,29 @@ func handleExplain(c *gin.Context) {
 		}
 	}
 
+	for _, span := range spans {
+		if err := ledger.Record(req.DocumentId, req.FileName, span, span.Replacement); err != nil {
+			log.Printf("Error: failed to record redaction in ledger: %v", err)
+		}
+	}
+
 	c.JSON(http.StatusOK, spans)
+}
+
+func handleGetLedger(c *gin.Context) {
+	docID := c.Query("documentId")
+	if docID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId parameter is required"})
+		return
+	}
+
+	entries, err := ledger.Get(docID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve ledger entries: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, entries)
 }
 
 func handleDeleteContext(c *gin.Context) {

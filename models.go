@@ -22,6 +22,8 @@ type FilterRequest struct {
 	Text       string `json:"text" binding:"required"`
 	Context    string `json:"context"`
 	PolicyName string `json:"policy" binding:"required"`
+	DocumentId string `json:"document_id"`
+	FileName   string `json:"file_name"`
 }
 
 type PolicyRequest struct {
