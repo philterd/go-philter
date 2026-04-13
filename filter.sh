@@ -1,23 +1,32 @@
 #!/bin/bash -e
 
-#curl -v -k -X POST "https://localhost:8443/api/policies" \
-#     -H 'Content-Type: application/json' -H "Authorization: Bearer $API_TOKEN" \
-#     -d '{
-#           "name": "my-policy",
-#           "policy": {
-#             "identifiers": {
-#               "ssn": {
-#                 "enabled": true
-#               }
-#             }
-#           }
-#         }'
+curl -v -k -X POST "https://localhost:8443/api/policies" \
+     -H 'Content-Type: application/json' -H "Authorization: Bearer $API_TOKEN" \
+     -d '{
+           "name": "my-policy",
+           "policy": {
+             "identifiers": {
+               "ssn": {
+                 "enabled": true
+               },
+               "pheye": [
+                 {
+                   "enabled": true,
+                   "pheyeConfiguration": {
+                     "modelPath": "/tmp/ph-eye-pii-base",
+                     "labels": "Person"
+                   }
+                 }
+               ]
+             }
+           }
+         }'
 
 curl -s -k -X POST "https://localhost:8443/api/filter" \
      -H 'Content-Type: application/json' \
      -H "Authorization: Bearer $API_TOKEN" \
           -d '{
-           "text": "His SSN is 123-45-6789 and 123-45-6789.",
+           "text": "George Washington had a SSN 123-45-6789.",
            "context": "my-context",
            "policy": "my-policy"
          }' \

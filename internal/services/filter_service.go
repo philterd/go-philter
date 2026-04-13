@@ -276,9 +276,9 @@ func buildFilters(pol *policy.Policy) ([]filters.Filter, error) {
 		filterList = append(filterList, regex.NewZipCodeFilter(strategies, ids.ZipCode.Ignored, ids.ZipCode.IgnoredPatterns, requireDelimiter))
 	}
 
-	for _, phEyeCfg := range ids.PhEye {
-		if phEyeCfg.IsEnabled() {
-			filterList = append(filterList, pheye.NewPhEyeFilter(phEyeCfg))
+	for _, pheyeCfg := range ids.PhEye {
+		if pheyeCfg.IsEnabled() {
+			filterList = append(filterList, pheye.NewPhEyeFilter(pheyeCfg))
 		}
 	}
 

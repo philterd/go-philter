@@ -9,7 +9,7 @@ Welcome to the documentation for Philter, a service for redacting sensitive info
   - Configuration environment variables and authentication.
 
 - [Managing Policies](policies.md)
-  - Creating, updating, listing, and deleting policies.
+  - Creating, updating, listing, and deleting policies (includes PhEye).
 
 - [Redacting and Explaining Text](redaction.md)
   - Using the `/filter` and `/explain` endpoints.

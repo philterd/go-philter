@@ -1,27 +1,8 @@
-// Copyright 2026 Philterd, LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// Package pheye provides a filter that identifies person names using the ph-eye NER service.
 package pheye
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/philterd/go-philter/internal/filters"
@@ -29,40 +10,26 @@ import (
 	"github.com/philterd/go-philter/internal/policy"
 )
 
-const (
-	defaultEndpoint = "http://localhost:18080"
-	defaultTimeout  = 600
-	defaultLabels   = "Person"
-)
-
-// phEyeRequest is the JSON body sent to the ph-eye /find endpoint.
-type phEyeRequest struct {
-	Text      string   `json:"text"`
-	Threshold float64  `json:"threshold"`
-	Labels    []string `json:"labels"`
-}
-
-// phEyeEntity is a single entity returned by the ph-eye service.
-type phEyeEntity struct {
-	Start int     `json:"start"`
-	End   int     `json:"end"`
-	Label string  `json:"label"`
-	Score float64 `json:"score"`
-	Text  string  `json:"text"`
-}
-
-// PhEyeFilter identifies person names by calling the ph-eye NER service.
+// PhEyeFilter identifies entities by calling the direct PhEye model.
 type PhEyeFilter struct {
 	filterConfig policy.PhEyeFilter
-	httpClient   *http.Client
+	client       Client
 	ignored      map[string]struct{}
 }
 
 // NewPhEyeFilter creates a new PhEyeFilter from the given filter configuration.
 func NewPhEyeFilter(cfg policy.PhEyeFilter) *PhEyeFilter {
-	timeout := cfg.PhEyeConfiguration.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
+	modelPath := cfg.PhEyeConfiguration.ModelPath
+	var client Client
+	var err error
+
+	// This function is defined in either client_cgo.go or client_mock.go
+	if modelPath != "" {
+		client, err = newClient(modelPath)
+		if err != nil {
+			// In a real app we might want to log this or handle it differently
+			fmt.Printf("pheye: failed to create client: %v\n", err)
+		}
 	}
 
 	ignoredSet := make(map[string]struct{}, len(cfg.Ignored))
@@ -72,20 +39,30 @@ func NewPhEyeFilter(cfg policy.PhEyeFilter) *PhEyeFilter {
 
 	return &PhEyeFilter{
 		filterConfig: cfg,
-		httpClient: &http.Client{
-			Timeout: time.Duration(timeout) * time.Second,
-		},
-		ignored: ignoredSet,
+		client:       client,
+		ignored:      ignoredSet,
 	}
 }
 
-// GetFilterType returns the filter type for ph-eye.
+// Close releases the underlying PhEye client.
+func (f *PhEyeFilter) Close() error {
+	if f.client != nil {
+		return f.client.Close()
+	}
+	return nil
+}
+
+// GetFilterType returns the filter type for pheye.
 func (f *PhEyeFilter) GetFilterType() model.FilterType {
 	return model.FilterTypePhEye
 }
 
-// Filter sends the input text to the ph-eye service and returns identified person-name spans.
+// Filter identifies entities using the direct PhEye model.
 func (f *PhEyeFilter) Filter(pol *policy.Policy, context string, input string) ([]model.Span, error) {
+	if f.client == nil {
+		return nil, nil
+	}
+
 	if pol == nil || len(pol.Identifiers.PhEye) == 0 {
 		return nil, nil
 	}
@@ -95,20 +72,15 @@ func (f *PhEyeFilter) Filter(pol *policy.Policy, context string, input string) (
 		text = removePunctuation(text)
 	}
 
-	endpoint := f.filterConfig.PhEyeConfiguration.Endpoint
-	if endpoint == "" {
-		endpoint = defaultEndpoint
-	}
-
 	labelsStr := f.filterConfig.PhEyeConfiguration.Labels
 	if labelsStr == "" {
-		labelsStr = defaultLabels
+		labelsStr = "Person"
 	}
 	labels := splitLabels(labelsStr)
 
-	entities, err := f.callPhEye(endpoint, text, labels)
+	entities, err := f.client.Predict(text, labels, 0.5)
 	if err != nil {
-		return nil, fmt.Errorf("ph-eye filter: %w", err)
+		return nil, fmt.Errorf("pheye filter: %w", err)
 	}
 
 	strategies := f.filterConfig.PhEyeFilterStrategies
@@ -145,50 +117,6 @@ func (f *PhEyeFilter) Filter(pol *policy.Policy, context string, input string) (
 	return model.DropOverlappingSpans(spans), nil
 }
 
-// callPhEye posts the request to the ph-eye /find endpoint and returns the entities.
-func (f *PhEyeFilter) callPhEye(endpoint string, text string, labels []string) ([]phEyeEntity, error) {
-	reqBody := phEyeRequest{
-		Text:      text,
-		Threshold: 0.5,
-		Labels:    labels,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	url := strings.TrimRight(endpoint, "/") + "/find"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	bearerToken := f.filterConfig.BearerToken
-	if bearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+bearerToken)
-	}
-
-	resp, err := f.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ph-eye service returned status %d", resp.StatusCode)
-	}
-
-	var entities []phEyeEntity
-	if err := json.NewDecoder(resp.Body).Decode(&entities); err != nil {
-		return nil, err
-	}
-
-	return entities, nil
-}
-
-// splitLabels splits a comma-separated labels string into a slice, trimming whitespace.
 func splitLabels(s string) []string {
 	parts := strings.Split(s, ",")
 	result := make([]string, 0, len(parts))
@@ -201,7 +129,6 @@ func splitLabels(s string) []string {
 	return result
 }
 
-// removePunctuation removes punctuation characters from the text.
 func removePunctuation(s string) string {
 	var sb strings.Builder
 	for _, r := range s {
@@ -212,7 +139,6 @@ func removePunctuation(s string) string {
 	return sb.String()
 }
 
-// applyStrategy applies a filter strategy to produce a replacement string.
 func applyStrategy(strategy policy.FilterStrategy, filterType model.FilterType, text string, context string) string {
 	if strategy.Strategy == "" || strategy.Strategy == policy.StrategyRedact {
 		format := strategy.RedactionFormat

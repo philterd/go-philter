@@ -47,7 +47,8 @@ func main() {
 		api.GET("/contexts/:name", handlers.HandleGetContext)
 		api.GET("/policies", handlers.HandleListPolicies)
 		api.GET("/policies/:name", handlers.HandleGetPolicy)
-		api.POST("/policies", handlers.HandlePutPolicy)
+		api.POST("/policies", handlers.HandleCreatePolicy)
+		api.PUT("/policies/:name", handlers.HandleUpdatePolicy)
 		api.DELETE("/policies/:name", handlers.HandleDeletePolicy)
 	}
 

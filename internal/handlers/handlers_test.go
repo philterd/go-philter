@@ -435,7 +435,8 @@ func TestHandlePolicyCRUD(t *testing.T) {
 	r := gin.Default()
 	r.GET("/api/policies", HandleListPolicies)
 	r.GET("/api/policies/:name", HandleGetPolicy)
-	r.POST("/api/policies", HandlePutPolicy)
+	r.POST("/api/policies", HandleCreatePolicy)
+	r.PUT("/api/policies/:name", HandleUpdatePolicy)
 	r.DELETE("/api/policies/:name", HandleDeletePolicy)
 
 	p := &policy.Policy{
@@ -478,13 +479,52 @@ func TestHandlePolicyCRUD(t *testing.T) {
 	json.Unmarshal(resp.Body.Bytes(), &list)
 	assert.Contains(t, list, "crud-policy")
 
-	// 4. DELETE policy
+	// 5. POST policy (verify conflict)
+	req, _ = http.NewRequest(http.MethodPost, "/api/policies", bytes.NewBuffer(body))
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	assert.Equal(t, http.StatusConflict, resp.Code)
+
+	// 6. PUT policy (update)
+	pUpdate := &policy.Policy{
+		Identifiers: policy.Identifiers{
+			Age: &policy.AgeFilter{
+				BaseFilter: policy.BaseFilter{
+					Enabled: new(bool),
+				},
+			},
+		},
+	}
+	*pUpdate.Identifiers.Age.Enabled = true
+	bodyUpdate, _ := json.Marshal(pUpdate)
+	req, _ = http.NewRequest(http.MethodPut, "/api/policies/crud-policy", bytes.NewBuffer(bodyUpdate))
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	assert.Equal(t, http.StatusOK, resp.Code)
+
+	// 7. GET policy (verify update)
+	req, _ = http.NewRequest(http.MethodGet, "/api/policies/crud-policy", nil)
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	assert.Equal(t, http.StatusOK, resp.Code)
+	var pUpdateResp policy.Policy
+	json.Unmarshal(resp.Body.Bytes(), &pUpdateResp)
+	assert.NotNil(t, pUpdateResp.Identifiers.Age)
+	assert.True(t, *pUpdateResp.Identifiers.Age.Enabled)
+
+	// 8. PUT policy (not found)
+	req, _ = http.NewRequest(http.MethodPut, "/api/policies/non-existent", bytes.NewBuffer(bodyUpdate))
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	assert.Equal(t, http.StatusNotFound, resp.Code)
+
+	// 9. DELETE policy
 	req, _ = http.NewRequest(http.MethodDelete, "/api/policies/crud-policy", nil)
 	resp = httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 	assert.Equal(t, http.StatusNoContent, resp.Code)
 
-	// 5. GET policy (verify gone)
+	// 10. GET policy (verify gone)
 	req, _ = http.NewRequest(http.MethodGet, "/api/policies/crud-policy", nil)
 	resp = httptest.NewRecorder()
 	r.ServeHTTP(resp, req)

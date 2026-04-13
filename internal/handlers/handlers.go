@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/philterd/go-philter/internal/metrics"
 	"github.com/philterd/go-philter/internal/model"
+	"github.com/philterd/go-philter/internal/policy"
 	"github.com/philterd/go-philter/internal/services"
 )
 
@@ -301,10 +302,20 @@ func HandleGetPolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
-func HandlePutPolicy(c *gin.Context) {
+func HandleCreatePolicy(c *gin.Context) {
 	var req model.PolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	p, err := policyService.Get(req.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check existing policy: " + err.Error()})
+		return
+	}
+	if p != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "policy already exists"})
 		return
 	}
 
@@ -313,6 +324,36 @@ func HandlePutPolicy(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusCreated)
+}
+
+func HandleUpdatePolicy(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "policy name is required"})
+		return
+	}
+
+	var p policy.Policy
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	existing, err := policyService.Get(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check existing policy: " + err.Error()})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "policy not found"})
+		return
+	}
+
+	if err := policyService.Put(name, &p); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update policy: " + err.Error()})
+		return
+	}
+	c.Status(http.StatusOK)
 }
 
 func HandleDeletePolicy(c *gin.Context) {
