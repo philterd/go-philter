@@ -25,9 +25,10 @@ import (
 	"github.com/philterd/go-philter/internal/metrics"
 )
 
-var version = "development"
+var version = "0.1.0"
 
 func main() {
+
 	handlers.Version = version
 	handlers.Init()
 
@@ -39,7 +40,8 @@ func main() {
 	{
 		api.POST("/filter", handlers.HandleFilter)
 		api.POST("/explain", handlers.HandleExplain)
-		api.GET("/ledger", handlers.HandleGetLedger)
+		api.GET("/ledger/:documentId", handlers.HandleGetLedger)
+		api.GET("/ledger/:documentId/verify", handlers.HandleVerifyLedger)
 		api.DELETE("/contexts/:name", handlers.HandleDeleteContext)
 		api.GET("/contexts", handlers.HandleListContexts)
 		api.GET("/contexts/:name", handlers.HandleGetContext)
@@ -61,4 +63,5 @@ func main() {
 		log.Printf("Starting HTTP server on :8080")
 		log.Fatal(r.Run(":8080"))
 	}
+
 }

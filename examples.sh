@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Configuration
+# Port 8443 if running in docker-compose.
+# Port 8080 if running just the executable.
 API_URL="https://localhost:8443/api"
 API_TOKEN="secret-token"
 HEADERS="-H 'Content-Type: application/json' -H \"Authorization: Bearer $API_TOKEN\""

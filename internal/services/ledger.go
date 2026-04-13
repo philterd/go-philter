@@ -17,6 +17,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -39,6 +40,7 @@ import (
 
 // Entry represents an immutable redaction record in the ledger.
 type Entry struct {
+	Index        int       `json:"index" bson:"index"`
 	DocumentId   string    `json:"document_id" bson:"document_id"`
 	Text         string    `json:"text" bson:"text"`
 	Replacement  string    `json:"replacement" bson:"replacement"`
@@ -53,6 +55,7 @@ type Entry struct {
 type Ledger interface {
 	Record(docID, fileName string, span model.Span, replacement string) error
 	Get(docID string) ([]Entry, error)
+	Verify(docID string) (bool, error)
 }
 
 func encrypt(text string, key []byte) (string, error) {
@@ -106,8 +109,8 @@ func decrypt(cryptoText string, key []byte) (string, error) {
 
 type memoryLedger struct {
 	mu            sync.Mutex
-	entries       []Entry
-	lastHash      []byte
+	docEntries    map[string][]Entry
+	docLastHash   map[string][]byte
 	encryptionKey []byte
 }
 
@@ -124,8 +127,8 @@ func NewMemoryLedger() *memoryLedger {
 	}
 
 	return &memoryLedger{
-		entries:       make([]Entry, 0),
-		lastHash:      make([]byte, 32), // Start with a zero hash for the first entry
+		docEntries:    make(map[string][]Entry),
+		docLastHash:   make(map[string][]byte),
 		encryptionKey: key,
 	}
 }
@@ -139,15 +142,21 @@ func (l *memoryLedger) Record(docID, fileName string, span model.Span, replaceme
 		return fmt.Errorf("failed to encrypt text: %w", err)
 	}
 
+	lastHash, ok := l.docLastHash[docID]
+	if !ok {
+		lastHash = make([]byte, 32)
+	}
+
 	entry := Entry{
+		Index:        len(l.docEntries[docID]),
 		DocumentId:   docID,
 		Text:         encryptedText,
 		Replacement:  replacement,
 		Start:        span.CharacterStart,
 		Stop:         span.CharacterEnd,
 		FileName:     fileName,
-		Timestamp:    time.Now(),
-		PreviousHash: l.lastHash,
+		Timestamp:    time.Now().UTC().Truncate(time.Millisecond),
+		PreviousHash: lastHash,
 	}
 
 	// Calculate current hash
@@ -157,9 +166,9 @@ func (l *memoryLedger) Record(docID, fileName string, span model.Span, replaceme
 		return fmt.Errorf("failed to marshal entry: %w", err)
 	}
 	h.Write(data)
-	l.lastHash = h.Sum(nil)
+	l.docLastHash[docID] = h.Sum(nil)
 
-	l.entries = append(l.entries, entry)
+	l.docEntries[docID] = append(l.docEntries[docID], entry)
 	return nil
 }
 
@@ -167,27 +176,60 @@ func (l *memoryLedger) Get(docID string) ([]Entry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	var result []Entry
-	for _, entry := range l.entries {
-		if entry.DocumentId == docID {
-			// Decrypt the text before returning
-			decryptedText, err := decrypt(entry.Text, l.encryptionKey)
-			if err != nil {
-				// If decryption fails, we'll return the entry with original (encrypted) text or an error?
-				// Returning an error is safer to avoid returning garbage.
-				return nil, fmt.Errorf("failed to decrypt entry: %w", err)
-			}
-			entry.Text = decryptedText
-			result = append(result, entry)
+	entries, ok := l.docEntries[docID]
+	if !ok {
+		return []Entry{}, nil
+	}
+
+	result := make([]Entry, len(entries))
+	for i, entry := range entries {
+		// Decrypt the text before returning
+		decryptedText, err := decrypt(entry.Text, l.encryptionKey)
+		if err != nil {
+			// If decryption fails, return an error.
+			return nil, fmt.Errorf("failed to decrypt entry: %w", err)
 		}
+		entry.Text = decryptedText
+		result[i] = entry
 	}
 	return result, nil
+}
+
+func (l *memoryLedger) Verify(docID string) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Ensure the document ID actually exists in our records
+	entries, ok := l.docEntries[docID]
+	if !ok {
+		return false, fmt.Errorf("no entries found for documentId: %s", docID)
+	}
+
+	// Re-calculate the chain for this document and verify its integrity
+	lastComputedHash := make([]byte, 32)
+	for i := range entries {
+		entry := entries[i]
+		if !bytes.Equal(entry.PreviousHash, lastComputedHash) {
+			return false, nil
+		}
+
+		h := sha256.New()
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return false, fmt.Errorf("failed to marshal entry for verification: %w", err)
+		}
+		h.Write(data)
+		lastComputedHash = h.Sum(nil)
+	}
+
+	return true, nil
 }
 
 type mongoLedger struct {
 	collection    *mongo.Collection
 	mu            sync.Mutex
 	lastHash      []byte
+	lastIndex     int
 	encryptionKey []byte
 }
 
@@ -223,27 +265,6 @@ func NewMongoLedger(uri, dbName, collectionName string) (*mongoLedger, error) {
 		encryptionKey: key,
 	}
 
-	// Initialize lastHash from the latest entry in the database
-	opts := options.FindOne().SetSort(bson.D{{Key: "timestamp", Value: -1}})
-	var lastEntry Entry
-	err = coll.FindOne(ctx, bson.M{}, opts).Decode(&lastEntry)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			l.lastHash = make([]byte, 32)
-		} else {
-			return nil, fmt.Errorf("failed to retrieve last entry from mongodb: %w", err)
-		}
-	} else {
-		// Calculate the hash of the last entry
-		h := sha256.New()
-		data, err := json.Marshal(lastEntry)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal last entry: %w", err)
-		}
-		h.Write(data)
-		l.lastHash = h.Sum(nil)
-	}
-
 	return l, nil
 }
 
@@ -256,35 +277,51 @@ func (l *mongoLedger) Record(docID, fileName string, span model.Span, replacemen
 		return fmt.Errorf("failed to encrypt text: %w", err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Initialize lastHash and lastIndex from the latest entry for this document
+	opts := options.FindOne().SetSort(bson.D{{Key: "index", Value: -1}})
+	var lastEntry Entry
+	var lastHash []byte
+	lastIndex := -1
+
+	err = l.collection.FindOne(ctx, bson.M{"document_id": docID}, opts).Decode(&lastEntry)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			lastHash = make([]byte, 32)
+			lastIndex = -1
+		} else {
+			return fmt.Errorf("failed to retrieve last entry for document %s from mongodb: %w", docID, err)
+		}
+	} else {
+		// Calculate the hash of the last entry
+		h := sha256.New()
+		data, err := json.Marshal(lastEntry)
+		if err != nil {
+			return fmt.Errorf("failed to marshal last entry: %w", err)
+		}
+		h.Write(data)
+		lastHash = h.Sum(nil)
+		lastIndex = lastEntry.Index
+	}
+
 	entry := Entry{
+		Index:        lastIndex + 1,
 		DocumentId:   docID,
 		Text:         encryptedText,
 		Replacement:  replacement,
 		Start:        span.CharacterStart,
 		Stop:         span.CharacterEnd,
 		FileName:     fileName,
-		Timestamp:    time.Now(),
-		PreviousHash: l.lastHash,
+		Timestamp:    time.Now().UTC().Truncate(time.Millisecond),
+		PreviousHash: lastHash,
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
 	_, err = l.collection.InsertOne(ctx, entry)
 	if err != nil {
 		return fmt.Errorf("failed to insert entry into mongodb: %w", err)
 	}
-
-	// Calculate current hash for next record
-	h := sha256.New()
-	data, err := json.Marshal(entry)
-	if err != nil {
-		// This is critical if we want immutability, but here we'll just log
-		log.Printf("Warning: failed to marshal entry for hashing: %v", err)
-		return fmt.Errorf("failed to marshal entry for hashing: %w", err)
-	}
-	h.Write(data)
-	l.lastHash = h.Sum(nil)
 
 	return nil
 }
@@ -315,4 +352,48 @@ func (l *mongoLedger) Get(docID string) ([]Entry, error) {
 	}
 
 	return entries, nil
+}
+
+func (l *mongoLedger) Verify(docID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Retrieve entries for this document to verify its chain
+	filter := bson.M{"document_id": docID}
+	opts := options.Find().SetSort(bson.D{{Key: "index", Value: 1}})
+	cursor, err := l.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return false, fmt.Errorf("failed to retrieve entries for verification: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	lastComputedHash := make([]byte, 32)
+	count := 0
+
+	for cursor.Next(ctx) {
+		var entry Entry
+		if err := cursor.Decode(&entry); err != nil {
+			return false, fmt.Errorf("failed to decode entry for verification: %w", err)
+		}
+
+		if !bytes.Equal(entry.PreviousHash, lastComputedHash) {
+			return false, nil
+		}
+
+		h := sha256.New()
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return false, fmt.Errorf("failed to marshal entry for verification: %w", err)
+		}
+		h.Write(data)
+		lastComputedHash = h.Sum(nil)
+		count++
+	}
+
+	if count == 0 {
+		return false, fmt.Errorf("no entries found for documentId: %s", docID)
+	}
+
+	return true, nil
+
 }

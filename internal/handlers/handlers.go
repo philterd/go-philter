@@ -100,8 +100,6 @@ func HandleFilter(c *gin.Context) {
 		docID = uuid.New().String()
 	}
 
-	c.Header("X-Document-Id", docID)
-
 	tokens := strings.Fields(req.Text)
 	metrics.IncrementTokensReceived(len(tokens))
 
@@ -135,11 +133,15 @@ func HandleFilter(c *gin.Context) {
 		}
 	}
 
-	for _, span := range res.Spans {
-		if err := ledger.Record(docID, req.FileName, span, span.Replacement); err != nil {
-			log.Printf("Error: failed to record redaction in ledger: %v", err)
+	if c.Query("ledger") != "" {
+		for _, span := range res.Spans {
+			if err := ledger.Record(docID, req.FileName, span, span.Replacement); err != nil {
+				log.Printf("Error: failed to record redaction in ledger: %v", err)
+			}
 		}
 	}
+
+	res.DocumentId = docID
 
 	c.JSON(http.StatusOK, res)
 }
@@ -155,8 +157,6 @@ func HandleExplain(c *gin.Context) {
 	if docID == "" {
 		docID = uuid.New().String()
 	}
-
-	c.Header("X-Document-Id", docID)
 
 	tokens := strings.Fields(req.Text)
 	metrics.IncrementTokensReceived(len(tokens))
@@ -191,17 +191,22 @@ func HandleExplain(c *gin.Context) {
 		}
 	}
 
-	for _, span := range spans {
-		if err := ledger.Record(docID, req.FileName, span, span.Replacement); err != nil {
-			log.Printf("Error: failed to record redaction in ledger: %v", err)
+	if c.Query("ledger") != "" {
+		for _, span := range spans {
+			if err := ledger.Record(docID, req.FileName, span, span.Replacement); err != nil {
+				log.Printf("Error: failed to record redaction in ledger: %v", err)
+			}
 		}
 	}
 
-	c.JSON(http.StatusOK, spans)
+	c.JSON(http.StatusOK, model.ExplainResult{
+		DocumentId: docID,
+		Spans:      spans,
+	})
 }
 
 func HandleGetLedger(c *gin.Context) {
-	docID := c.Query("documentId")
+	docID := c.Param("documentId")
 	if docID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId parameter is required"})
 		return
@@ -214,6 +219,22 @@ func HandleGetLedger(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, entries)
+}
+
+func HandleVerifyLedger(c *gin.Context) {
+	docID := c.Param("documentId")
+	if docID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "documentId parameter is required"})
+		return
+	}
+
+	ok, err := ledger.Verify(docID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify ledger: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"verified": ok})
 }
 
 func HandleDeleteContext(c *gin.Context) {
@@ -339,4 +360,5 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+
 }

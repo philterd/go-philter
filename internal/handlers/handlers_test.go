@@ -60,10 +60,11 @@ func TestHandleFilter(t *testing.T) {
 	r.ServeHTTP(resp, req)
 
 	assert.Equal(t, http.StatusOK, resp.Code)
-	assert.NotEmpty(t, resp.Header().Get("X-Document-Id"))
+	assert.Empty(t, resp.Header().Get("X-Document-Id"))
 
 	var res map[string]any
 	json.Unmarshal(resp.Body.Bytes(), &res)
+	assert.NotEmpty(t, res["documentId"])
 	assert.Contains(t, res["filteredText"], "{{{REDACTED-ssn}}}")
 }
 
@@ -71,6 +72,7 @@ func TestHandleExplain(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 	r.POST("/api/explain", HandleExplain)
+	r.GET("/api/ledger/:documentId", HandleGetLedger)
 
 	p := &policy.Policy{
 		Identifiers: policy.Identifiers{
@@ -82,26 +84,61 @@ func TestHandleExplain(t *testing.T) {
 		},
 	}
 	*p.Identifiers.SSN.Enabled = true
-
 	policyService.Put("test-policy", p)
 
-	reqBody := model.FilterRequest{
-		Text:       "His SSN is 123-45-6789.",
-		Context:    "test",
-		PolicyName: "test-policy",
-	}
-	body, _ := json.Marshal(reqBody)
+	t.Run("LedgerEnabled", func(t *testing.T) {
+		reqBody := model.FilterRequest{
+			Text:       "His SSN is 123-45-6789.",
+			Context:    "test-explain-ledger-enabled",
+			PolicyName: "test-policy",
+		}
+		body, _ := json.Marshal(reqBody)
 
-	req, _ := http.NewRequest(http.MethodPost, "/api/explain", bytes.NewBuffer(body))
-	resp := httptest.NewRecorder()
-	r.ServeHTTP(resp, req)
+		req, _ := http.NewRequest(http.MethodPost, "/api/explain?ledger=true", bytes.NewBuffer(body))
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
-	assert.NotEmpty(t, resp.Header().Get("X-Document-Id"))
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var res map[string]any
+		json.Unmarshal(resp.Body.Bytes(), &res)
+		docID := res["documentId"].(string)
 
-	var spans []any
-	json.Unmarshal(resp.Body.Bytes(), &spans)
-	assert.NotEmpty(t, spans)
+		req, _ = http.NewRequest(http.MethodGet, "/api/ledger/"+docID, nil)
+		resp = httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var entries []any
+		json.Unmarshal(resp.Body.Bytes(), &entries)
+		assert.NotEmpty(t, entries)
+	})
+
+	t.Run("LedgerDisabled", func(t *testing.T) {
+		reqBody := model.FilterRequest{
+			Text:       "His SSN is 123-45-6789.",
+			Context:    "test-explain-ledger-disabled",
+			PolicyName: "test-policy",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req, _ := http.NewRequest(http.MethodPost, "/api/explain", bytes.NewBuffer(body))
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var res map[string]any
+		json.Unmarshal(resp.Body.Bytes(), &res)
+		docID := res["documentId"].(string)
+
+		req, _ = http.NewRequest(http.MethodGet, "/api/ledger/"+docID, nil)
+		resp = httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var entries []any
+		json.Unmarshal(resp.Body.Bytes(), &entries)
+		assert.Empty(t, entries)
+	})
 }
 
 func TestContextPersistence(t *testing.T) {
@@ -452,6 +489,82 @@ func TestHandlePolicyCRUD(t *testing.T) {
 	resp = httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 	assert.Equal(t, http.StatusNotFound, resp.Code)
+}
+
+func TestHandleGetLedger(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.Default()
+	r.POST("/api/filter", HandleFilter)
+	r.GET("/api/ledger/:documentId", HandleGetLedger)
+	r.GET("/api/ledger/:documentId/verify", HandleVerifyLedger)
+
+	p := &policy.Policy{
+		Identifiers: policy.Identifiers{
+			SSN: &policy.SSNFilter{
+				BaseFilter: policy.BaseFilter{
+					Enabled: new(bool),
+				},
+			},
+		},
+	}
+	*p.Identifiers.SSN.Enabled = true
+	policyService.Put("test-policy", p)
+
+	t.Run("LedgerEnabled", func(t *testing.T) {
+		reqBody := model.FilterRequest{
+			Text:       "His SSN is 123-45-6789.",
+			Context:    "test-ledger-enabled",
+			PolicyName: "test-policy",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req, _ := http.NewRequest(http.MethodPost, "/api/filter?ledger=true", bytes.NewBuffer(body))
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var res map[string]any
+		json.Unmarshal(resp.Body.Bytes(), &res)
+		docID := res["documentId"].(string)
+		assert.NotEmpty(t, docID)
+
+		req, _ = http.NewRequest(http.MethodGet, "/api/ledger/"+docID, nil)
+		resp = httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var entries []any
+		json.Unmarshal(resp.Body.Bytes(), &entries)
+		assert.NotEmpty(t, entries)
+	})
+
+	t.Run("LedgerDisabled", func(t *testing.T) {
+		reqBody := model.FilterRequest{
+			Text:       "His SSN is 123-45-6789.",
+			Context:    "test-ledger-disabled",
+			PolicyName: "test-policy",
+		}
+		body, _ := json.Marshal(reqBody)
+
+		req, _ := http.NewRequest(http.MethodPost, "/api/filter", bytes.NewBuffer(body))
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var res map[string]any
+		json.Unmarshal(resp.Body.Bytes(), &res)
+		docID := res["documentId"].(string)
+		assert.NotEmpty(t, docID)
+
+		req, _ = http.NewRequest(http.MethodGet, "/api/ledger/"+docID, nil)
+		resp = httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusOK, resp.Code)
+		var entries []any
+		json.Unmarshal(resp.Body.Bytes(), &entries)
+		assert.Empty(t, entries)
+	})
 }
 
 func TestAuthMiddleware(t *testing.T) {

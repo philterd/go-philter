@@ -14,14 +14,8 @@
 
 package model
 
-// FilterResult contains the result of a filter operation on text.
-type FilterResult struct {
-
-	// FilteredText is the text after sensitive information has been processed.
-	FilteredText string `json:"filteredText"`
-
-	// Context is the name of the context.
-	Context string `json:"context"`
+// ExplainResult contains the results of an explanation operation.
+type ExplainResult struct {
 
 	// DocumentId is the ID assigned to the document.
 	DocumentId string `json:"documentId"`

@@ -7,16 +7,23 @@ services:
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - MONGO_DATABASE=philter
-      - PHILTER_AUTH_ENABLED=true
+      - PHILTER_AUTH_ENABLED=false
       - PHILTER_API_TOKEN=secret-token
       - LEDGER_ENCRYPTION_KEY=12345678901234567890123456789012
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
 
   mongodb:
     image: mongo:latest
     ports:
       - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     volumes:
       - mongodb_data:/data/db
 
