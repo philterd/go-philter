@@ -1,7 +1,7 @@
 # Philter
 
 > [!NOTE]
-> This project is currently in active development. We welcome issue reports and pull requests.
+> This project is currently in experimental and not mean to be used in production right now.
 
 Philter is an application for PII/PHI redaction and anonymization. It provides endpoints to filter sensitive information from text, explain identified spans, and manage redaction policies and contexts.
 
