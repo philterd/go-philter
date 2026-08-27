@@ -1,8 +1,21 @@
 # Build stage
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-bookworm AS builder
 
 # Install build tools for CGO, CMake, and GLiNER.cpp
-RUN apk add --no-cache build-base git make cmake g++ musl-dev rust cargo tar wget gcompat ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    make \
+    cmake \
+    g++ \
+    tar \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install modern Rust using rustup
+RUN wget -qO- https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Clone and build GLiNER.cpp to get libgliner
 WORKDIR /gliner-cpp
@@ -16,10 +29,13 @@ RUN wget --no-check-certificate https://github.com/microsoft/onnxruntime/release
 RUN sed -i 's/(\*handle).decode_str.len()/(\&(\*handle).decode_str).len()/g' deps/tokenizers-cpp/rust/src/lib.rs && \
     sed -i 's/(\*handle).id_to_token_result.len()/(\&(\*handle).id_to_token_result).len()/g' deps/tokenizers-cpp/rust/src/lib.rs
 
-RUN cmake . -D BUILD_SHARED_LIBS=ON -D ONNXRUNTIME_ROOTDIR=$(pwd)/onnxruntime-linux-x64-1.19.2 && \
-    make -j$(nproc) && \
-    cp libgliner.so /usr/local/lib/ && \
-    cp gliner.h /usr/local/include/
+RUN cmake . -D BUILD_SHARED_LIBS=OFF -D ONNXRUNTIME_ROOTDIR=$(pwd)/onnxruntime-linux-x64-1.19.2 && \
+    cmake --build . -- -j$(nproc)
+
+RUN find /gliner-cpp -name 'libgliner.a' -exec cp {} /usr/local/lib/ \;
+RUN find /gliner-cpp -name 'gliner.h' -exec cp {} /usr/local/include/ \;
+RUN test -f /usr/local/include/gliner.h || (find /gliner-cpp -name 'gliner*' && exit 1)
+RUN cp /gliner-cpp/onnxruntime-linux-x64-1.19.2/lib/*.so* /usr/local/lib/
 
 WORKDIR /app
 
@@ -35,17 +51,21 @@ ARG VERSION=development
 RUN go build -tags pheye -ldflags "-X main.version=${VERSION}" -o /go-philter .
 
 # Run stage
-FROM alpine:3.19
+FROM ubuntu:24.04
 
-# Install openssl to generate self-signed certificate and libstdc++ for GLiNER.cpp
-RUN apk add --no-cache openssl libstdc++ gcompat
+# Install openssl to generate self-signed certificate and dependencies for GLiNER.cpp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl \
+    libstdc++6 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 
 # Copy the binary from the build stage
 COPY --from=builder /go-philter /go-philter
-# Copy libgliner.so and onnxruntime libraries from the build stage
-COPY --from=builder /usr/local/lib/libgliner.so /usr/local/lib/libgliner.so
+# Copy libgliner.a and onnxruntime libraries from the build stage
+COPY --from=builder /usr/local/lib/libgliner.a /usr/local/lib/libgliner.a
 COPY --from=builder /gliner-cpp/onnxruntime-linux-x64-1.19.2/lib/*.so* /usr/local/lib/
 
 # Generate self-signed certificate

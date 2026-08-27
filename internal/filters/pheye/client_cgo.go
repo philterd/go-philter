@@ -3,21 +3,10 @@
 package pheye
 
 /*
-#cgo LDFLAGS: -lgliner -lstdc++
+#cgo CFLAGS: -I/usr/local/include
+#cgo LDFLAGS: -L/usr/local/lib -Wl,-Bstatic -lgliner -Wl,-Bdynamic -lonnxruntime -lstdc++ -lm
 #include <stdlib.h>
-
-typedef struct {
-    int start;
-    int end;
-    char* label;
-    float score;
-    char* text;
-} gliner_span_t;
-
-void* gliner_init(const char* model_path);
-void gliner_free(void* ctx);
-int gliner_predict(void* ctx, const char* text, const char** labels, int num_labels, float threshold, gliner_span_t* spans, int max_spans);
-void gliner_free_spans(gliner_span_t* spans, int num_spans);
+#include <gliner.h>
 */
 import "C"
 

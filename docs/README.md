@@ -19,6 +19,9 @@ Welcome to the documentation for Philter, a service for redacting sensitive info
   - How contexts provide consistent redactions across requests.
   - API endpoints for managing contexts.
 
+- [Health](health.md)
+  - The `/api/health` liveness endpoint.
+
 - [Immutable Ledger](ledgers.md)
   - Cryptographically verifiable record of redactions.
   - Retrieving and verifying the redaction chain.

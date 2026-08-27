@@ -52,6 +52,9 @@ func main() {
 		api.DELETE("/policies/:name", handlers.HandleDeletePolicy)
 	}
 
+	// Registered outside the /api group so it is reachable without authentication.
+	r.GET("/api/health", handlers.HandleHealth)
+
 	r.GET("/metrics", metrics.HandleMetrics)
 
 	certFile := os.Getenv("PHILTER_CERT_FILE")
