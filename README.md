@@ -45,6 +45,10 @@ Refer to the `examples.sh` script for common API operations using `curl`.
 
 For more detailed technical information, see [DEVELOPER.md](DEVELOPER.md).
 
+## Community
+
+Users and developers are invited to join the [Philterd Slack workspace](https://philterd.ai/slack/) to ask questions, share feedback, and discuss development.
+
 ## License
 
 Copyright 2026 Philterd, LLC. "Philter" is a registered trademark of Philterd, LLC.
